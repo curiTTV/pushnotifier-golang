@@ -10,59 +10,58 @@ import (
 	"time"
 )
 
+func init() {
+	httpClient = &http.Client{
+		Timeout: time.Duration(5 * time.Second),
+	}
+}
+
 // New creates a new instance of Pushnotifier
-func New(packageName, apiToken string) (*Pushnotifier, error) {
+func New(packageName, apiToken string) *Pushnotifier {
 	packageName = strings.TrimSpace(packageName)
 	apiToken = strings.TrimSpace(apiToken)
-
-	if packageName == "" {
-		return nil, ErrMissingPackageName
-	} else if apiToken == "" {
-		return nil, ErrMissingAPIToken
-	}
 
 	pn := &Pushnotifier{
 		packageName: packageName,
 		apiToken:    apiToken,
-		endpoints:   make(map[string]*endpoint),
 	}
 
-	pn.endpoints["login"] = &endpoint{
+	pn.endpoints.login = &endpoint{
 		method: "POST",
 		uri:    "user/login",
 	}
 
-	pn.endpoints["refreshToken"] = &endpoint{
+	pn.endpoints.refresh = &endpoint{
 		method: "GET",
 		uri:    "user/refresh",
 	}
 
-	pn.endpoints["devices"] = &endpoint{
+	pn.endpoints.devices = &endpoint{
 		method: "GET",
 		uri:    "devices",
 	}
 
-	pn.endpoints["sendText"] = &endpoint{
+	pn.endpoints.sendText = &endpoint{
 		method: "PUT",
 		uri:    "notifications/text",
 	}
 
-	pn.endpoints["sendURL"] = &endpoint{
+	pn.endpoints.sendURL = &endpoint{
 		method: "PUT",
 		uri:    "notifications/url",
 	}
 
-	pn.endpoints["sendNotification"] = &endpoint{
+	pn.endpoints.sendNotification = &endpoint{
 		method: "PUT",
 		uri:    "notifications/notification",
 	}
 
-	pn.endpoints["sendImage"] = &endpoint{
+	pn.endpoints.sendImage = &endpoint{
 		method: "PUT",
 		uri:    "notifications/image",
 	}
 
-	return pn, nil
+	return pn
 }
 
 // Login retrieves an app_token from pushnotifier.de
@@ -70,7 +69,11 @@ func (pn *Pushnotifier) Login(username, password string) error {
 	username = strings.TrimSpace(username)
 	password = strings.TrimSpace(password)
 
-	if username == "" || password == "" {
+	if pn.packageName == "" {
+		return ErrMissingPackageName
+	} else if pn.apiToken == "" {
+		return ErrMissingAPIToken
+	} else if username == "" || password == "" {
 		return ErrMissingCredentials
 	}
 
@@ -79,7 +82,27 @@ func (pn *Pushnotifier) Login(username, password string) error {
 		Password: password,
 	}
 
-	statusCode, resp, err := pn.apiRequest(pn.endpoints["login"], pn.credentials)
+	return pn.loginOrRefresh(pn.endpoints.login)
+}
+
+// Refresh refreshes the expired app token from pushnotifier.de
+func (pn *Pushnotifier) Refresh() error {
+	return pn.loginOrRefresh(pn.endpoints.refresh)
+}
+
+func (pn *Pushnotifier) loginOrRefresh(endpoint *endpoint) error {
+	var (
+		statusCode int
+		resp       []byte
+		err        error
+	)
+
+	if endpoint == pn.endpoints.login {
+		statusCode, resp, err = pn.apiRequest(endpoint, pn.credentials)
+	} else if endpoint == pn.endpoints.refresh {
+		statusCode, resp, err = pn.apiRequest(pn.endpoints.refresh, nil)
+	}
+
 	if err != nil {
 		return err
 	}
@@ -90,18 +113,25 @@ func (pn *Pushnotifier) Login(username, password string) error {
 		return ErrInvalidCredentials
 	}
 
-	pn.appToken = &appToken{}
+	appToken := &appToken{}
 
-	err = json.Unmarshal(resp, &pn.appToken)
+	err = json.Unmarshal(resp, appToken)
 	if err != nil {
 		return err
 	}
 
+	if appToken.Token == "" || appToken.ExpiresAt < 1 {
+		return ErrMissingAppToken
+	}
+
+	pn.appToken = appToken
+
 	return nil
 }
 
+// Devices retrieves all devices from pushnotifier.de
 func (pn *Pushnotifier) Devices() ([]*Device, error) {
-	_, resp, err := pn.apiRequest(pn.endpoints["devices"], nil)
+	_, resp, err := pn.apiRequest(pn.endpoints.devices, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +143,67 @@ func (pn *Pushnotifier) Devices() ([]*Device, error) {
 		return nil, err
 	}
 
+	pn.devices = devices
+
 	return devices, nil
+}
+
+// Text sends a text notification to all given devices
+// If devices is nil the notification will be send to all devices
+func (pn *Pushnotifier) Text(devices []*Device, content string) error {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ErrNotificationContentMissing
+	}
+
+	notification := &pnNotification{
+		Content: content,
+	}
+
+	return pn.notification(devices, notification)
+}
+
+func (pn *Pushnotifier) notification(devices []*Device, notification *pnNotification) error {
+	deviceIDs := []string{}
+
+	if devices == nil {
+		devices = pn.GetDevices()
+	}
+
+	for _, device := range devices {
+		deviceIDs = append(deviceIDs, device.ID)
+	}
+
+	notification.Devices = deviceIDs
+
+	statusCode, resp, err := pn.apiRequest(pn.endpoints.sendText, notification)
+
+	if statusCode >= 500 {
+		return ErrPushnotifierServerError
+	} else if statusCode != 200 {
+		return ErrDeviceNotFound
+	}
+
+	if err != nil {
+		return err
+	}
+
+	response := &pnNotificationResponse{}
+	err = json.Unmarshal(resp, response)
+	if err != nil {
+		return err
+	}
+
+	if len(response.Error) > 0 || len(response.Success) < 1 {
+		return ErrNotAllDevicesReached
+	}
+
+	return nil
+}
+
+// GetDevices returns all cached devices which were retrieved in an earlier request
+func (pn *Pushnotifier) GetDevices() []*Device {
+	return pn.devices
 }
 
 func (pn *Pushnotifier) apiRequest(endpoint *endpoint, body interface{}) (int, []byte, error) {
@@ -122,17 +212,13 @@ func (pn *Pushnotifier) apiRequest(endpoint *endpoint, body interface{}) (int, [
 		return 0, nil, err
 	}
 
-	client := http.Client{
-		Timeout: time.Duration(5 * time.Second),
-	}
-
 	url := "https://api.pushnotifier.de/v2/" + endpoint.uri
 
 	var request *http.Request
 
 	switch endpoint.method {
 	case "GET":
-		request, err = http.NewRequest("GET", url, nil)
+		request, err = http.NewRequest(http.MethodGet, url, nil)
 
 	case "POST", "PUT":
 		request, err = http.NewRequest(endpoint.method, url, bytes.NewBuffer(data))
@@ -150,7 +236,7 @@ func (pn *Pushnotifier) apiRequest(endpoint *endpoint, body interface{}) (int, [
 		return 0, nil, err
 	}
 
-	resp, err := client.Do(request)
+	resp, err := httpClient.Do(request)
 	if err != nil {
 		return 0, nil, err
 	}
