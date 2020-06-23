@@ -5,7 +5,7 @@ This library implements all endpoints of [pushnotifier.de](pushnotifier.de)
 ## Installation
 
 ```bash
-go get https://github.com/curiTTV/pushnotifier-golang
+go get github.com/curiTTV/pushnotifier-golang
 ```
 
 ## Usage
