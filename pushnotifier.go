@@ -1,4 +1,4 @@
-package main
+package pushnotifier
 
 import (
 	"bytes"
@@ -145,7 +145,7 @@ func (pn *Pushnotifier) Devices() ([]*Device, error) {
 
 	pn.devices = devices
 
-	return devices, nil
+	return pn.GetDevices(), nil
 }
 
 // Text sends a text notification to all given devices
@@ -160,10 +160,71 @@ func (pn *Pushnotifier) Text(devices []*Device, content string) error {
 		Content: content,
 	}
 
-	return pn.notification(devices, notification)
+	return pn.notification(pn.endpoints.sendText, devices, notification)
 }
 
-func (pn *Pushnotifier) notification(devices []*Device, notification *pnNotification) error {
+// URL sends an URL notification to all given devices
+// If devices is nil the notification will be send to all devices
+func (pn *Pushnotifier) URL(devices []*Device, url string) error {
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return ErrNotificationURLMissing
+	}
+
+	notification := &pnNotification{
+		URL: url,
+	}
+
+	return pn.notification(pn.endpoints.sendURL, devices, notification)
+}
+
+// Notification sends a text and an URL notification to all given devices
+// If devices is nil the notification will be send to all devices
+func (pn *Pushnotifier) Notification(devices []*Device, content, url string) error {
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return ErrNotificationURLMissing
+	}
+
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ErrNotificationContentMissing
+	}
+
+	notification := &pnNotification{
+		URL:     url,
+		Content: content,
+	}
+
+	return pn.notification(pn.endpoints.sendURL, devices, notification)
+}
+
+// Image sends an image notification to all given devices
+// If devices is nil the notification will be send to all devices
+func (pn *Pushnotifier) Image(devices []*Device, image []byte, imageName string) error {
+	return ErrNotificationNotSupported
+
+	// size := len(image)
+	// if size < 1 {
+	// 	return ErrNotificationImageMissing
+	// } else if size > 5242879 {
+	// 	return ErrNotificationImageTooBig
+	// }
+
+	// imageName = strings.TrimSpace(imageName)
+	// if imageName == "" {
+	// 	return ErrNotificationImageNameMissing
+	// }
+
+	// notification := &pnNotification{
+	// 	Content:  base64.StdEncoding.EncodeToString(image),
+	// 	FileName: imageName,
+	// }
+
+	// return pn.notification(pn.endpoints.sendImage, devices, notification)
+}
+
+func (pn *Pushnotifier) notification(endpoint *endpoint, devices []*Device, notification *pnNotification) error {
 	deviceIDs := []string{}
 
 	if devices == nil {
@@ -176,16 +237,18 @@ func (pn *Pushnotifier) notification(devices []*Device, notification *pnNotifica
 
 	notification.Devices = deviceIDs
 
-	statusCode, resp, err := pn.apiRequest(pn.endpoints.sendText, notification)
-
-	if statusCode >= 500 {
-		return ErrPushnotifierServerError
-	} else if statusCode != 200 {
-		return ErrDeviceNotFound
-	}
+	statusCode, resp, err := pn.apiRequest(endpoint, notification)
 
 	if err != nil {
 		return err
+	}
+
+	if statusCode >= 500 {
+		return ErrPushnotifierServerError
+		// } else if statusCode == 413 {
+		// 	return ErrNotificationImageTooBig
+	} else if statusCode != 200 {
+		return ErrDeviceNotFound
 	}
 
 	response := &pnNotificationResponse{}
@@ -194,7 +257,7 @@ func (pn *Pushnotifier) notification(devices []*Device, notification *pnNotifica
 		return err
 	}
 
-	if len(response.Error) > 0 || len(response.Success) < 1 {
+	if len(response.Error) > 0 || len(response.Success) < len(devices) {
 		return ErrNotAllDevicesReached
 	}
 

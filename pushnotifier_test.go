@@ -1,4 +1,4 @@
-package main
+package pushnotifier
 
 import (
 	"bytes"
@@ -172,7 +172,7 @@ func TestDevices(t *testing.T) {
 }
 
 func TestText(t *testing.T) {
-	wantDataAll := []*Device{
+	wantDevices := []*Device{
 		{
 			ID: "d1",
 		},
@@ -180,39 +180,79 @@ func TestText(t *testing.T) {
 			ID: "d2",
 		},
 	}
-	wantDataSpecific := []*Device{
+	wantContent := "hello"
+
+	httpClient = &mockClient{
+		mockDo: func(req *http.Request) (*http.Response, error) {
+			if req.Method != http.MethodPut {
+				t.Error("Invalid method for test notifications provided")
+			}
+
+			buf := new(bytes.Buffer)
+			buf.ReadFrom(req.Body)
+			notification := &pnNotification{}
+			err := json.Unmarshal(buf.Bytes(), notification)
+			if err != nil {
+				t.Error(err)
+			}
+
+			for i, deviceID := range notification.Devices {
+				if deviceID != wantDevices[i].ID {
+					t.Error("mismatch of requested device id")
+				}
+			}
+
+			if notification.Content != wantContent {
+				t.Error("content mismatch")
+			}
+
+			response := &pnNotificationResponse{}
+
+			for _, deviceID := range wantDevices {
+				response.Success = append(response.Success, deviceID.ID)
+			}
+
+			data, err := json.Marshal(response)
+			if err != nil {
+				t.Error(err)
+			}
+
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       ioutil.NopCloser(bytes.NewReader(data)),
+			}, nil
+		},
+	}
+
+	// all devices
+	pn.devices = wantDevices
+
+	if err := pn.Text(nil, wantContent); err != nil {
+		t.Error(err)
+	}
+
+	// specific devices
+	wantDevices = []*Device{
 		{
 			ID: "d3",
 		},
 	}
 
-	httpClient = &mockClient{
-		mockDo: func(req *http.Request) (*http.Response, error) {
-			if req.Method != http.MethodPut {
-				t.Error("Invalid method for test notifications provided")
-			}
-
-			response := &pnNotificationResponse{}
-
-			for _, deviceID := range wantDataAll {
-				response.Success = append(response.Success, deviceID.ID)
-			}
-
-			data, err := json.Marshal(response)
-			if err != nil {
-				t.Error(err)
-			}
-
-			return &http.Response{
-				StatusCode: http.StatusOK,
-				Body:       ioutil.NopCloser(bytes.NewReader(data)),
-			}, nil
-		},
-	}
-
-	if err := pn.Text(nil, "hello"); err != nil {
+	if err := pn.Text(wantDevices, wantContent); err != nil {
 		t.Error(err)
 	}
+}
+
+func TestURL(t *testing.T) {
+	wantDevices := []*Device{
+		{
+			ID: "d1",
+		},
+		{
+			ID: "d2",
+		},
+	}
+	wantURL := "https://github.com/curiTTV"
 
 	httpClient = &mockClient{
 		mockDo: func(req *http.Request) (*http.Response, error) {
@@ -220,9 +260,27 @@ func TestText(t *testing.T) {
 				t.Error("Invalid method for test notifications provided")
 			}
 
+			buf := new(bytes.Buffer)
+			buf.ReadFrom(req.Body)
+			notification := &pnNotification{}
+			err := json.Unmarshal(buf.Bytes(), notification)
+			if err != nil {
+				t.Error(err)
+			}
+
+			for i, deviceID := range notification.Devices {
+				if deviceID != wantDevices[i].ID {
+					t.Error("mismatch of requested device id")
+				}
+			}
+
+			if notification.URL != wantURL {
+				t.Error("url mismatch")
+			}
+
 			response := &pnNotificationResponse{}
 
-			for _, deviceID := range wantDataSpecific {
+			for _, deviceID := range wantDevices {
 				response.Success = append(response.Success, deviceID.ID)
 			}
 
@@ -238,7 +296,82 @@ func TestText(t *testing.T) {
 		},
 	}
 
-	if err := pn.Text(wantDataSpecific, "hello"); err != nil {
+	wantDevices = []*Device{
+		{
+			ID: "d5",
+		},
+	}
+
+	if err := pn.URL(wantDevices, wantURL); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestNotification(t *testing.T) {
+	wantDevices := []*Device{
+		{
+			ID: "d1",
+		},
+		{
+			ID: "d2",
+		},
+	}
+	wantURL := "https://github.com/curiTTV"
+	wantContent := "hello"
+
+	httpClient = &mockClient{
+		mockDo: func(req *http.Request) (*http.Response, error) {
+			if req.Method != http.MethodPut {
+				t.Error("Invalid method for test notifications provided")
+			}
+
+			buf := new(bytes.Buffer)
+			buf.ReadFrom(req.Body)
+			notification := &pnNotification{}
+			err := json.Unmarshal(buf.Bytes(), notification)
+			if err != nil {
+				t.Error(err)
+			}
+
+			for i, deviceID := range notification.Devices {
+				if deviceID != wantDevices[i].ID {
+					t.Error("mismatch of requested device id")
+				}
+			}
+
+			if notification.URL != wantURL {
+				t.Error("url mismatch")
+			}
+
+			if notification.Content != wantContent {
+				t.Error("url mismatch")
+			}
+
+			response := &pnNotificationResponse{}
+
+			for _, deviceID := range wantDevices {
+				response.Success = append(response.Success, deviceID.ID)
+			}
+
+			data, err := json.Marshal(response)
+			if err != nil {
+				t.Error(err)
+			}
+
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       ioutil.NopCloser(bytes.NewReader(data)),
+			}, nil
+		},
+	}
+
+	wantDevices = []*Device{
+		{
+			ID: "d5",
+		},
+	}
+
+	if err := pn.Notification(wantDevices, wantContent, wantURL); err != nil {
 		t.Error(err)
 	}
 }

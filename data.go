@@ -1,4 +1,4 @@
-package main
+package pushnotifier
 
 import (
 	"errors"
@@ -22,13 +22,29 @@ var (
 	ErrMissingAppToken = errors.New("pushnotifier-golang: returned app token empty")
 
 	// ErrPushnotifierServerError is returned if a server error >500 happened on any request
+	// This can happen if a notification should be send to a registered device which actually does not "exists" any more
 	ErrPushnotifierServerError = errors.New("pushnotifier-golang: server error happened on pushnotifier.de")
 
 	// ErrInvalidHTTPMethod is returned if a http method is used which is not supported by pushnotifier.de
 	ErrInvalidHTTPMethod = errors.New("pushnotifier-golang: invalid http method provided")
 
 	// ErrNotificationContentMissing is returned if no content was provided
-	ErrNotificationContentMissing = errors.New("pushnotifier-golang: empty content provided")
+	ErrNotificationContentMissing = errors.New("pushnotifier-golang: content not provided")
+
+	// ErrNotificationURLMissing is returned if no url was provided
+	ErrNotificationURLMissing = errors.New("pushnotifier-golang: url not provided")
+
+	// ErrNotificationImageMissing is returned if the content of an image was not provided
+	ErrNotificationImageMissing = errors.New("pushnotifier-golang: image content not provided")
+
+	// ErrNotificationImageTooBig is returned if the the size of the image was too big
+	ErrNotificationImageTooBig = errors.New("pushnotifier-golang: image file size is to big")
+
+	// ErrNotificationImageNameMissing is returned if no image name was provided
+	ErrNotificationImageNameMissing = errors.New("pushnotifier-golang: image name not provided")
+
+	// ErrNotificationNotSupported is returned if a feature is not supported yet
+	ErrNotificationNotSupported = errors.New("pushnotifier-golang: feature not supported yet")
 
 	// ErrDeviceNotFound is returned if pushnotifier.de can not find at least one of the given devices
 	ErrDeviceNotFound = errors.New("pushnotifier-golang: device could not be found")
@@ -89,9 +105,11 @@ type (
 	}
 
 	pnNotification struct {
-		Devices []string `json:"devices"`
-		Content string   `json:"content,omitempty"`
-		URL     string   `json:"url,omitempty"`
+		Devices  []string `json:"devices"`
+		Content  string   `json:"content,omitempty"`
+		URL      string   `json:"url,omitempty"`
+		Silent   bool     `json:"silent"`
+		FileName string   `json:"filename"`
 	}
 
 	pnNotificationResponse struct {
